@@ -8,7 +8,7 @@ Source : observatoire des territoires
 URL : https://www.observatoire-des-territoires.gouv.fr/outils/cartographie-interactive/#c=indicator&i=surocc_hstud.tx_hstu1p_surocc&s=2021&view=map78  
 Dernières données disponibles : 2021  
 
-maj script : 15/01/2026
+maj script : 03/02/2026
 """
 
 from __future__ import annotations
@@ -48,12 +48,27 @@ def fetch_raw_csv(filename: str, sep=";", header=2) -> pd.DataFrame:
     return pd.read_csv(csv_path, sep=sep, header=header)
 
 
+def fetch_epci_mapping(filename: str = "epci_membres.csv") -> pd.DataFrame:
+    script_dir = Path(__file__).parent
+    csv_path = script_dir.parent / "source" / filename
+    df = pd.read_csv(csv_path, sep=",")
+    return df[["siren"]].drop_duplicates().rename(columns={"siren": "epci_id"})
+
+
 def clean_and_prepare_df(df: pd.DataFrame) -> pd.DataFrame:
     df = (df.rename(
             columns={"Code": "epci_id",
                     "Part des logements sur-occupés hors studios d'une seule personne 2021": "value",})
         .drop(columns=["Libellé"])
         )
+    
+    df["value"] = pd.to_numeric(df["value"], errors="coerce")
+
+    # Chargement de la liste exhaustive des EPCI / EPT
+    epci_df = fetch_epci_mapping()
+
+    # Left join pour conserver tous les EPCI même sans valeur
+    df = epci_df.merge(df, on="epci_id", how="left")
 
     df["indicator_id"] = "i032"
     df["year"] = 2021
@@ -65,16 +80,11 @@ def clean_and_prepare_df(df: pd.DataFrame) -> pd.DataFrame:
 
 def transform_df_to_raw_values(df: pd.DataFrame) -> Iterator[RawValue]:
     for _, row in df.iterrows():
-        try:
-            value = float(row["value"])
-        except (ValueError, TypeError):
-            continue
-
         yield RawValue(
             epci_id=str(row["epci_id"]),
             indicator_id=row["indicator_id"],
             year=int(row["year"]),
-            value=value,
+            value=float(row["value"]),
             unit=str(row["unit"]),
             source=row["source"],
             meta={}
