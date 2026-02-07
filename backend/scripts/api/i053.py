@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from typing import Iterable, Iterator
 
 from pathlib import Path
-import pandas as pd 
+import pandas as pd
 
 from sqlalchemy import select
 
@@ -41,7 +41,7 @@ class RawValue:
 
 
 def fetch_raw_csv(filename: str, sep=";", header=2) -> pd.DataFrame:
-    script_dir = Path(__file__).parent      # scripts/api/
+    script_dir = Path(__file__).parent  # scripts/api/
     csv_path = script_dir.parent / "source" / filename  # scripts/source/
     return pd.read_csv(csv_path, sep=sep, header=header)
 
@@ -50,19 +50,12 @@ def fetch_bdv_epci_mapping(filename: str = "epci_membres.csv") -> pd.DataFrame:
     script_dir = Path(__file__).parent
     mapping_path = script_dir.parent / "source" / filename
 
-    df = pd.read_csv(
-        mapping_path,
-        sep=",",
-        dtype={"siren": str, "bassin_vie": str}
-    )
+    df = pd.read_csv(mapping_path, sep=",", dtype={"siren": str, "bassin_vie": str})
 
     df = df[["siren", "bassin_vie"]]
 
     # Exclusion TOM / îles
-    df = df[
-        (df["siren"] != "000000000") &
-        (df["bassin_vie"] != "00000")
-    ]
+    df = df[(df["siren"] != "000000000") & (df["bassin_vie"] != "00000")]
 
     return df.drop_duplicates().rename(columns={"siren": "epci_id"})
 
@@ -82,42 +75,33 @@ def clean_i053_df(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def aggregate_bdv_to_epci(
-    df_indicator: pd.DataFrame,
-    df_mapping: pd.DataFrame
+    df_indicator: pd.DataFrame, df_mapping: pd.DataFrame
 ) -> pd.DataFrame:
 
-    df = df_mapping.merge(
-        df_indicator,
-        on="bassin_vie",
-        how="left"
-    )
+    df = df_mapping.merge(df_indicator, on="bassin_vie", how="left")
 
     # moyenne simple
     df["value"] = pd.to_numeric(df["value"], errors="coerce")
     df = df.groupby("epci_id", as_index=False).mean(numeric_only=True)
 
-    return df
+    return df.drop_duplicates()
 
 
 def finalize_i053_df(df: pd.DataFrame) -> pd.DataFrame:
     df["indicator_id"] = "i053"
     df["year"] = 2020
-    df["unit"] = None
+    df["unit"] = "km"
     df["source"] = "INSEE"
 
     return df[
         ["epci_id", "indicator_id", "year", "value", "unit", "source"]
-    ]
+    ].drop_duplicates()
 
 
 def complete_with_all_epci(df: pd.DataFrame) -> pd.DataFrame:
     epci_df = fetch_bdv_epci_mapping()
 
-    return epci_df.merge(
-        df,
-        on="epci_id",
-        how="left"
-    )
+    return epci_df.merge(df, on="epci_id", how="left")
 
 
 def transform_df_to_raw_values(df: pd.DataFrame) -> Iterator[RawValue]:
@@ -129,7 +113,7 @@ def transform_df_to_raw_values(df: pd.DataFrame) -> Iterator[RawValue]:
             value=None if pd.isna(row["value"]) else float(row["value"]),
             unit=row["unit"],
             source=row["source"],
-            meta={}
+            meta={},
         )
 
 
@@ -156,15 +140,19 @@ def persist_values(session, rows: Iterable[RawValue]) -> int:
 def ensure_indicator_exists(session, indicator_id: str) -> None:
     """Optionnel : vérifier que l'indicateur ciblé existe côté base."""
 
-    exists = session.execute(select(Indicator.id).where(Indicator.id == indicator_id)).scalar_one_or_none()
+    exists = session.execute(
+        select(Indicator.id).where(Indicator.id == indicator_id)
+    ).scalar_one_or_none()
     if not exists:
-        raise ValueError(f"L'indicateur {indicator_id} est introuvable en base. Importez d'abord la table de référence.")
+        raise ValueError(
+            f"L'indicateur {indicator_id} est introuvable en base. Importez d'abord la table de référence."
+        )
 
 
 def run(csv_filename: str) -> None:
     session = SessionLocal()
     try:
-        ensure_indicator_exists(session, "i053") # adapter avec l'indicateur_id
+        ensure_indicator_exists(session, "i053")  # adapter avec l'indicateur_id
         df_raw = fetch_raw_csv(csv_filename)
         df_i053 = clean_i053_df(df_raw)
 
@@ -188,8 +176,19 @@ def run(csv_filename: str) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description= "Import CSV -> valeur_indicateur (indicateur i053)") # "Import CSV -> valeur_indicateur"
-    parser.add_argument("--csv", default= "i053.csv", help= "Nom du fichier CSV à importer (dans scripts/source/)",) # adapter le default
+    parser = argparse.ArgumentParser(
+        description="Import CSV -> valeur_indicateur (indicateur i053)"
+    )  # "Import CSV -> valeur_indicateur"
+    parser.add_argument(
+        "--csv",
+        default="i053.csv",
+        help="Nom du fichier CSV à importer (dans scripts/source/)",
+    )  # adapter le default
+    parser.add_argument(
+        "--save",
+        action="store_true",
+        help="Output CSV (dans scripts/output/)",
+    )  # adapter le default
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -210,9 +209,16 @@ def main() -> None:
         df_epci = aggregate_bdv_to_epci(df_i053, df_mapping)
         df_epci = complete_with_all_epci(df_epci)
         df_final = finalize_i053_df(df_epci)
-       
+
         rows = list(transform_df_to_raw_values(df_final))
         print(json.dumps([row.__dict__ for row in rows], indent=2, ensure_ascii=False))
+
+        if args.save:
+            script_dir = Path(__file__).parent
+            csv_path = script_dir.parent / "output" / args.csv
+            df_final.to_csv(csv_path, index=False)
+            print(f"Fichier sauvegardé : {csv_path}")
+
         return
 
     run(args.csv)
@@ -220,4 +226,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-    

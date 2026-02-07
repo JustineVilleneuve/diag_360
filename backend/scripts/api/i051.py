@@ -2,8 +2,8 @@
 Indicateur i051 : Part des déplacements domicile-travail en voiture 2022
 
 Source : observatoire des territoires
-URL : https://www.observatoire-des-territoires.gouv.fr/outils/cartographie-interactive/#c=indicator&i=insee_rp_hist_xxxx.part_domtrav_voit&s=2022&view=map78  
-Dernières données disponibles : 2022  
+URL : https://www.observatoire-des-territoires.gouv.fr/outils/cartographie-interactive/#c=indicator&i=insee_rp_hist_xxxx.part_domtrav_voit&s=2022&view=map78
+Dernières données disponibles : 2022
 
 maj script : 03/02/2026
 """
@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from typing import Iterable, Iterator
 
 from pathlib import Path
-import pandas as pd 
+import pandas as pd
 
 from sqlalchemy import select
 
@@ -40,7 +40,7 @@ class RawValue:
 
 
 def fetch_raw_csv(filename: str, sep=";", header=2) -> pd.DataFrame:
-    script_dir = Path(__file__).parent      # scripts/api/
+    script_dir = Path(__file__).parent  # scripts/api/
     csv_path = script_dir.parent / "source" / filename  # scripts/source/i051.csv
     return pd.read_csv(csv_path, sep=sep, header=header)
 
@@ -53,12 +53,13 @@ def fetch_epci_mapping(filename: str = "epci_membres.csv") -> pd.DataFrame:
 
 
 def clean_and_prepare_df(df: pd.DataFrame) -> pd.DataFrame:
-    df = (df.rename(
-            columns={"Code": "epci_id",
-                    "Part des déplacements domicile-travail en voiture 2022": "value",})
-        .drop(columns=["Libellé"])
-        )
-    
+    df = df.rename(
+        columns={
+            "Code": "epci_id",
+            "Part des déplacements domicile-travail en voiture 2022": "value",
+        }
+    ).drop(columns=["Libellé"])
+
     df["value"] = pd.to_numeric(df["value"], errors="coerce")
 
     # Chargement de la liste exhaustive des EPCI / EPT
@@ -66,10 +67,10 @@ def clean_and_prepare_df(df: pd.DataFrame) -> pd.DataFrame:
 
     # Left join pour conserver tous les EPCI même sans valeur
     df = epci_df.merge(df, on="epci_id", how="left")
-    
+
     df["indicator_id"] = "i051"
     df["year"] = 2022
-    df["unit"] = None
+    df["unit"] = "%"
     df["source"] = "Observatoire des territoires"
 
     return df
@@ -84,7 +85,7 @@ def transform_df_to_raw_values(df: pd.DataFrame) -> Iterator[RawValue]:
             value=float(row["value"]),
             unit=str(row["unit"]),
             source=row["source"],
-            meta={}
+            meta={},
         )
 
 
@@ -111,15 +112,19 @@ def persist_values(session, rows: Iterable[RawValue]) -> int:
 def ensure_indicator_exists(session, indicator_id: str) -> None:
     """Optionnel : vérifier que l'indicateur ciblé existe côté base."""
 
-    exists = session.execute(select(Indicator.id).where(Indicator.id == indicator_id)).scalar_one_or_none()
+    exists = session.execute(
+        select(Indicator.id).where(Indicator.id == indicator_id)
+    ).scalar_one_or_none()
     if not exists:
-        raise ValueError(f"L'indicateur {indicator_id} est introuvable en base. Importez d'abord la table de référence.")
+        raise ValueError(
+            f"L'indicateur {indicator_id} est introuvable en base. Importez d'abord la table de référence."
+        )
 
 
 def run(csv_filename: str) -> None:
     session = SessionLocal()
     try:
-        ensure_indicator_exists(session, "i051") # adapter avec l'indicateur_id
+        ensure_indicator_exists(session, "i051")  # adapter avec l'indicateur_id
         df = fetch_raw_csv(csv_filename)
         df = clean_and_prepare_df(df)
         rows = list(transform_df_to_raw_values(df))
@@ -133,8 +138,19 @@ def run(csv_filename: str) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description= "Import CSV -> valeur_indicateur (indicateur i051)") # "Import CSV -> valeur_indicateur"
-    parser.add_argument("--csv", default= "i051.csv", help= "Nom du fichier CSV à importer (dans scripts/source/)",) # adapter le default
+    parser = argparse.ArgumentParser(
+        description="Import CSV -> valeur_indicateur (indicateur i051)"
+    )  # "Import CSV -> valeur_indicateur"
+    parser.add_argument(
+        "--csv",
+        default="i051.csv",
+        help="Nom du fichier CSV à importer (dans scripts/source/)",
+    )  # adapter le default
+    parser.add_argument(
+        "--save",
+        action="store_true",
+        help="Output CSV (dans scripts/output/)",
+    )  # adapter le default
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -153,6 +169,13 @@ def main() -> None:
         df = clean_and_prepare_df(df)
         rows = list(transform_df_to_raw_values(df))
         print(json.dumps([row.__dict__ for row in rows], indent=2, ensure_ascii=False))
+
+        if args.save:
+            script_dir = Path(__file__).parent
+            csv_path = script_dir.parent / "output" / args.csv
+            df.to_csv(csv_path, index=False)
+            print(f"Fichier sauvegardé : {csv_path}")
+
         return
 
     run(args.csv)
