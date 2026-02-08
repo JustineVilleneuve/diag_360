@@ -173,6 +173,13 @@ def main() -> None:
         df = clean_and_prepare_df(df)
         rows = list(transform_df_to_raw_values(df))
         print(json.dumps([row.__dict__ for row in rows], indent=2, ensure_ascii=False))
+        
+        if args.save:
+            script_dir = Path(__file__).parent
+            csv_path = script_dir.parent / "output" / args.csv
+            df.to_csv(csv_path, index=False)
+            print(f"Fichier sauvegardé : {csv_path}")
+            
         return
 
     run(args.csv)
