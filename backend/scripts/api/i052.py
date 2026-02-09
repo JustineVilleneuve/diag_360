@@ -55,7 +55,7 @@ def fetch_epci_mapping(filename: str = "epci_membres.csv") -> pd.DataFrame:
 def clean_and_prepare_df(df: pd.DataFrame) -> pd.DataFrame:
     df = (df.rename(
             columns={"Code": "epci_id",
-                    "Evolution de la part des déplacements domicile-travail en transports en commun 2016-2022": "value",})
+                    "Evolution de la part des déplacements domicile-travail en voiture 2016-2022": "value",})
         .drop(columns=["Libellé"])
         )
     
@@ -69,7 +69,7 @@ def clean_and_prepare_df(df: pd.DataFrame) -> pd.DataFrame:
     
     df["indicator_id"] = "i052"
     df["year"] = 2022
-    df["unit"] = None
+    df["unit"] = "points de %"
     df["source"] = "Observatoire des territoires"
 
     return df
@@ -81,8 +81,8 @@ def transform_df_to_raw_values(df: pd.DataFrame) -> Iterator[RawValue]:
             epci_id=str(row["epci_id"]),
             indicator_id=row["indicator_id"],
             year=int(row["year"]),
-            value=float(row["value"]),
-            unit=str(row["unit"]),
+            value=None if pd.isna(row["value"]) else float(row["value"]),
+            unit=row["unit"],
             source=row["source"],
             meta={}
         )
@@ -136,6 +136,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description= "Import CSV -> valeur_indicateur (indicateur i052)") # "Import CSV -> valeur_indicateur"
     parser.add_argument("--csv", default= "i052.csv", help= "Nom du fichier CSV à importer (dans scripts/source/)",) # adapter le default
     parser.add_argument(
+        "--save",
+        action="store_true",
+        help="Output CSV (dans scripts/output/)",
+    )  # adapter le default
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="N'insère rien en base, affiche seulement les lignes qui seraient importées.",
@@ -153,6 +158,12 @@ def main() -> None:
         df = clean_and_prepare_df(df)
         rows = list(transform_df_to_raw_values(df))
         print(json.dumps([row.__dict__ for row in rows], indent=2, ensure_ascii=False))
+        if args.save:
+            script_dir = Path(__file__).parent
+            csv_path = script_dir.parent / "output" / args.csv
+            df.to_csv(csv_path, index=False)
+            print(f"Fichier sauvegardé : {csv_path}")
+        
         return
 
     run(args.csv)
